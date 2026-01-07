@@ -1,0 +1,1573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuizBlitz - Real-Time Multiplayer Quiz</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Peerjs for P2P connection -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            color: white;
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+        }
+        .animate-pop {
+            animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes pop {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .animate-float {
+            animation: float 3s ease-in-out infinite;
+        }
+        .timer-bar {
+            transition: width 1s linear;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.2);
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 3px;
+        }
+        .glow-green {
+            box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+        }
+        .glow-red {
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+        }
+        .glow-yellow {
+            box-shadow: 0 0 30px rgba(250, 204, 21, 0.6);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(6, 182, 212, 0.3);
+        }
+        .btn-secondary {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            transition: all 0.3s ease;
+        }
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(139, 92, 246, 0.3);
+        }
+        .option-btn {
+            transition: all 0.2s ease;
+        }
+        .option-btn:hover:not(:disabled) {
+            transform: translateX(5px);
+            background: rgba(255,255,255,0.2);
+        }
+        .pulse-ring {
+            animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 1; }
+            80%, 100% { transform: scale(2); opacity: 0; }
+        }
+        .connection-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .connection-dot.connected {
+            background: #22c55e;
+            box-shadow: 0 0 10px #22c55e;
+        }
+        .connection-dot.connecting {
+            background: #eab308;
+            animation: blink 1s infinite;
+        }
+        .connection-dot.disconnected {
+            background: #ef4444;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            top: -10px;
+            animation: confetti-fall 3s linear forwards;
+        }
+        @keyframes confetti-fall {
+            to {
+                transform: translateY(100vh) rotate(720deg);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ============== MASSIVE QUIZ QUESTIONS DATABASE ==============
+        const QUIZ_CATEGORIES = {
+            general: {
+                name: "General Knowledge",
+                icon: "fa-globe",
+                questions: [
+                    { question: "What is the capital of France?", options: ["London", "Berlin", "Paris", "Madrid"], answer: 2 },
+                    { question: "Which planet is known as the Red Planet?", options: ["Venus", "Mars", "Jupiter", "Saturn"], answer: 1 },
+                    { question: "What is the largest ocean on Earth?", options: ["Atlantic", "Indian", "Arctic", "Pacific"], answer: 3 },
+                    { question: "Who painted the Mona Lisa?", options: ["Van Gogh", "Picasso", "Da Vinci", "Michelangelo"], answer: 2 },
+                    { question: "What year did World War II end?", options: ["1943", "1944", "1945", "1946"], answer: 2 },
+                    { question: "What is the largest country by area?", options: ["China", "USA", "Canada", "Russia"], answer: 3 },
+                    { question: "Which element has the chemical symbol 'O'?", options: ["Gold", "Oxygen", "Osmium", "Oganesson"], answer: 1 },
+                    { question: "What is the capital of Japan?", options: ["Seoul", "Beijing", "Tokyo", "Bangkok"], answer: 2 },
+                    { question: "How many continents are there?", options: ["5", "6", "7", "8"], answer: 2 },
+                    { question: "What is the longest river in the world?", options: ["Amazon", "Nile", "Yangtze", "Mississippi"], answer: 1 },
+                    { question: "Which country gave the Statue of Liberty to the USA?", options: ["UK", "France", "Germany", "Spain"], answer: 1 },
+                    { question: "What is the smallest country in the world?", options: ["Monaco", "Vatican City", "San Marino", "Liechtenstein"], answer: 1 },
+                    { question: "Who wrote 'Romeo and Juliet'?", options: ["Charles Dickens", "William Shakespeare", "Jane Austen", "Mark Twain"], answer: 1 },
+                    { question: "What is the currency of the UK?", options: ["Euro", "Dollar", "Pound Sterling", "Franc"], answer: 2 },
+                    { question: "Which planet is closest to the Sun?", options: ["Venus", "Earth", "Mercury", "Mars"], answer: 2 },
+                    { question: "What is the tallest mountain in the world?", options: ["K2", "Kangchenjunga", "Mount Everest", "Lhotse"], answer: 2 },
+                    { question: "In which year did the Titanic sink?", options: ["1910", "1912", "1914", "1916"], answer: 1 },
+                    { question: "What is the capital of Australia?", options: ["Sydney", "Melbourne", "Canberra", "Perth"], answer: 2 },
+                    { question: "How many days are in a leap year?", options: ["364", "365", "366", "367"], answer: 2 },
+                    { question: "What is the largest desert in the world?", options: ["Sahara", "Arabian", "Gobi", "Antarctic"], answer: 3 },
+                    { question: "Who discovered penicillin?", options: ["Marie Curie", "Alexander Fleming", "Louis Pasteur", "Isaac Newton"], answer: 1 },
+                    { question: "What is the main language spoken in Brazil?", options: ["Spanish", "Portuguese", "French", "English"], answer: 1 },
+                    { question: "Which ocean is the Bermuda Triangle located in?", options: ["Pacific", "Indian", "Atlantic", "Arctic"], answer: 2 },
+                    { question: "What is the hardest rock?", options: ["Granite", "Marble", "Diamond", "Quartz"], answer: 2 },
+                    { question: "Who invented the telephone?", options: ["Thomas Edison", "Nikola Tesla", "Alexander Graham Bell", "Guglielmo Marconi"], answer: 2 },
+                    { question: "What is the largest mammal?", options: ["Elephant", "Blue Whale", "Giraffe", "Hippopotamus"], answer: 1 },
+                    { question: "Which country has the most population?", options: ["USA", "India", "China", "Indonesia"], answer: 1 },
+                    { question: "What year did World War I begin?", options: ["1912", "1914", "1916", "1918"], answer: 1 },
+                    { question: "What is the capital of Canada?", options: ["Toronto", "Vancouver", "Montreal", "Ottawa"], answer: 3 },
+                    { question: "How many colors are in a rainbow?", options: ["5", "6", "7", "8"], answer: 2 },
+                ]
+            },
+            tech: {
+                name: "Technology",
+                icon: "fa-microchip",
+                questions: [
+                    { question: "What does HTML stand for?", options: ["Hyper Text Markup Language", "High Tech Multi Language", "Hyper Transfer Main Logic", "Home Tool Markup Language"], answer: 0 },
+                    { question: "Which company developed JavaScript?", options: ["Microsoft", "Sun Microsystems", "Netscape", "Oracle"], answer: 2 },
+                    { question: "What does CPU stand for?", options: ["Central Process Unit", "Central Processing Unit", "Computer Personal Unit", "Central Processor Unifier"], answer: 1 },
+                    { question: "Which is NOT a programming language?", options: ["Python", "Java", "HTML", "C++"], answer: 2 },
+                    { question: "What does API stand for?", options: ["Apple Pie Interface", "Application Programming Interface", "Advanced Protocol Integration", "Automated Process Interaction"], answer: 1 },
+                    { question: "Who founded Microsoft?", options: ["Steve Jobs", "Bill Gates", "Mark Zuckerberg", "Jeff Bezos"], answer: 1 },
+                    { question: "What does RAM stand for?", options: ["Random Access Memory", "Read And Modify", "Run Access Memory", "Random Allocation Memory"], answer: 0 },
+                    { question: "Which company created the iPhone?", options: ["Samsung", "Google", "Apple", "Microsoft"], answer: 2 },
+                    { question: "What year was Google founded?", options: ["1996", "1998", "2000", "2002"], answer: 1 },
+                    { question: "What does URL stand for?", options: ["Universal Resource Locator", "Uniform Resource Locator", "United Resource Link", "Universal Reference Link"], answer: 1 },
+                    { question: "Which programming language is known as the 'language of the web'?", options: ["Python", "Java", "JavaScript", "C#"], answer: 2 },
+                    { question: "What is the name of Google's mobile operating system?", options: ["iOS", "Windows Mobile", "Android", "Symbian"], answer: 2 },
+                    { question: "What does SSD stand for?", options: ["Solid State Drive", "Super Speed Disk", "System Storage Device", "Solid Storage Disk"], answer: 0 },
+                    { question: "Who is the CEO of Tesla?", options: ["Jeff Bezos", "Tim Cook", "Elon Musk", "Sundar Pichai"], answer: 2 },
+                    { question: "What does HTTP stand for?", options: ["Hyper Text Transfer Protocol", "High Transfer Text Protocol", "Hyper Text Transport Protocol", "High Tech Transfer Protocol"], answer: 0 },
+                    { question: "Which company owns Instagram?", options: ["Google", "Twitter", "Meta (Facebook)", "Snapchat"], answer: 2 },
+                    { question: "What is the main programming language for iOS apps?", options: ["Java", "Swift", "Kotlin", "Python"], answer: 1 },
+                    { question: "What year was the first iPhone released?", options: ["2005", "2006", "2007", "2008"], answer: 2 },
+                    { question: "What does GPU stand for?", options: ["General Processing Unit", "Graphics Processing Unit", "Game Processing Unit", "Global Processing Unit"], answer: 1 },
+                    { question: "Which company developed ChatGPT?", options: ["Google", "Microsoft", "OpenAI", "Meta"], answer: 2 },
+                    { question: "What is the name of Amazon's virtual assistant?", options: ["Siri", "Cortana", "Alexa", "Google Assistant"], answer: 2 },
+                    { question: "What does WiFi stand for?", options: ["Wireless Fidelity", "Wireless Frequency", "Wide Frequency", "Nothing - it's a brand name"], answer: 3 },
+                    { question: "Which company makes the PlayStation?", options: ["Microsoft", "Nintendo", "Sony", "Sega"], answer: 2 },
+                    { question: "What is the name of Apple's web browser?", options: ["Chrome", "Firefox", "Safari", "Edge"], answer: 2 },
+                    { question: "What does IoT stand for?", options: ["Internet of Things", "Integration of Technology", "Interface of Tools", "Internet of Technology"], answer: 0 },
+                    { question: "Which programming language was created by Guido van Rossum?", options: ["Java", "Ruby", "Python", "Perl"], answer: 2 },
+                    { question: "What year was Facebook founded?", options: ["2002", "2004", "2006", "2008"], answer: 1 },
+                    { question: "What is Linux?", options: ["A web browser", "An operating system", "A programming language", "A database"], answer: 1 },
+                    { question: "Who invented the World Wide Web?", options: ["Bill Gates", "Steve Jobs", "Tim Berners-Lee", "Mark Zuckerberg"], answer: 2 },
+                    { question: "What does VPN stand for?", options: ["Virtual Private Network", "Very Personal Network", "Virtual Public Network", "Verified Private Network"], answer: 0 },
+                ]
+            },
+            science: {
+                name: "Science",
+                icon: "fa-flask",
+                questions: [
+                    { question: "What is the chemical symbol for gold?", options: ["Go", "Gd", "Au", "Ag"], answer: 2 },
+                    { question: "What is the speed of light?", options: ["299,792 km/s", "150,000 km/s", "500,000 km/s", "1,000,000 km/s"], answer: 0 },
+                    { question: "What is the hardest natural substance?", options: ["Gold", "Iron", "Diamond", "Platinum"], answer: 2 },
+                    { question: "How many bones are in the human body?", options: ["186", "206", "226", "246"], answer: 1 },
+                    { question: "What gas do plants absorb?", options: ["Oxygen", "Nitrogen", "Carbon Dioxide", "Hydrogen"], answer: 2 },
+                    { question: "What is the largest organ in the human body?", options: ["Heart", "Liver", "Brain", "Skin"], answer: 3 },
+                    { question: "What is H2O commonly known as?", options: ["Hydrogen Peroxide", "Water", "Helium Oxide", "Heavy Water"], answer: 1 },
+                    { question: "How many planets are in our solar system?", options: ["7", "8", "9", "10"], answer: 1 },
+                    { question: "What is the chemical symbol for iron?", options: ["Ir", "In", "Fe", "I"], answer: 2 },
+                    { question: "What is the powerhouse of the cell?", options: ["Nucleus", "Ribosome", "Mitochondria", "Chloroplast"], answer: 2 },
+                    { question: "What planet is known for its rings?", options: ["Jupiter", "Saturn", "Uranus", "Neptune"], answer: 1 },
+                    { question: "What is the most abundant gas in Earth's atmosphere?", options: ["Oxygen", "Carbon Dioxide", "Nitrogen", "Hydrogen"], answer: 2 },
+                    { question: "What is the freezing point of water in Celsius?", options: ["-10°C", "0°C", "10°C", "32°C"], answer: 1 },
+                    { question: "Who developed the theory of relativity?", options: ["Isaac Newton", "Nikola Tesla", "Albert Einstein", "Stephen Hawking"], answer: 2 },
+                    { question: "What is the center of an atom called?", options: ["Electron", "Proton", "Nucleus", "Neutron"], answer: 2 },
+                    { question: "What type of animal is a dolphin?", options: ["Fish", "Mammal", "Reptile", "Amphibian"], answer: 1 },
+                    { question: "What is the boiling point of water in Celsius?", options: ["90°C", "100°C", "110°C", "212°C"], answer: 1 },
+                    { question: "How many chromosomes do humans have?", options: ["23", "46", "48", "92"], answer: 1 },
+                    { question: "What is the study of earthquakes called?", options: ["Geology", "Seismology", "Meteorology", "Volcanology"], answer: 1 },
+                    { question: "What vitamin is produced when skin is exposed to sunlight?", options: ["Vitamin A", "Vitamin B", "Vitamin C", "Vitamin D"], answer: 3 },
+                    { question: "What is the chemical formula for table salt?", options: ["NaCl", "KCl", "CaCl2", "MgCl2"], answer: 0 },
+                    { question: "What is the largest planet in our solar system?", options: ["Saturn", "Jupiter", "Neptune", "Uranus"], answer: 1 },
+                    { question: "What force keeps us on the ground?", options: ["Magnetism", "Friction", "Gravity", "Inertia"], answer: 2 },
+                    { question: "What is the study of living organisms called?", options: ["Chemistry", "Physics", "Biology", "Geology"], answer: 2 },
+                    { question: "How long does it take Earth to orbit the Sun?", options: ["24 hours", "7 days", "30 days", "365 days"], answer: 3 },
+                    { question: "What element does 'C' represent on the periodic table?", options: ["Calcium", "Carbon", "Chlorine", "Copper"], answer: 1 },
+                    { question: "What is the smallest unit of matter?", options: ["Cell", "Molecule", "Atom", "Electron"], answer: 2 },
+                    { question: "What is the name of the closest star to Earth?", options: ["Polaris", "Sirius", "Alpha Centauri", "The Sun"], answer: 3 },
+                    { question: "What gas do humans exhale?", options: ["Oxygen", "Carbon Dioxide", "Nitrogen", "Hydrogen"], answer: 1 },
+                    { question: "What is the pH of pure water?", options: ["0", "7", "10", "14"], answer: 1 },
+                ]
+            },
+            sports: {
+                name: "Sports",
+                icon: "fa-futbol",
+                questions: [
+                    { question: "How many players are on a soccer team?", options: ["9", "10", "11", "12"], answer: 2 },
+                    { question: "Which country hosted the 2016 Olympics?", options: ["China", "UK", "Brazil", "Japan"], answer: 2 },
+                    { question: "What sport uses a shuttlecock?", options: ["Tennis", "Badminton", "Squash", "Volleyball"], answer: 1 },
+                    { question: "How long is a marathon in miles?", options: ["24.2", "25.2", "26.2", "27.2"], answer: 2 },
+                    { question: "Which sport is played at Wimbledon?", options: ["Golf", "Cricket", "Tennis", "Rugby"], answer: 2 },
+                    { question: "How many points is a touchdown worth in American football?", options: ["3", "6", "7", "10"], answer: 1 },
+                    { question: "Which country has won the most FIFA World Cups?", options: ["Germany", "Argentina", "Brazil", "Italy"], answer: 2 },
+                    { question: "In which sport would you perform a slam dunk?", options: ["Volleyball", "Tennis", "Basketball", "Handball"], answer: 2 },
+                    { question: "How many rings are on the Olympic flag?", options: ["4", "5", "6", "7"], answer: 1 },
+                    { question: "What sport does Tiger Woods play?", options: ["Tennis", "Golf", "Cricket", "Baseball"], answer: 1 },
+                    { question: "How many periods are in an ice hockey game?", options: ["2", "3", "4", "5"], answer: 1 },
+                    { question: "What is the national sport of Japan?", options: ["Karate", "Judo", "Sumo", "Kendo"], answer: 2 },
+                    { question: "Which country invented cricket?", options: ["Australia", "India", "England", "South Africa"], answer: 2 },
+                    { question: "How many holes are in a full round of golf?", options: ["9", "12", "18", "21"], answer: 2 },
+                    { question: "What is the diameter of a basketball hoop in inches?", options: ["16", "18", "20", "22"], answer: 1 },
+                    { question: "Which boxer was known as 'The Greatest'?", options: ["Mike Tyson", "Muhammad Ali", "Floyd Mayweather", "Manny Pacquiao"], answer: 1 },
+                    { question: "How many players are on a volleyball team on court?", options: ["5", "6", "7", "8"], answer: 1 },
+                    { question: "What sport is known as 'the beautiful game'?", options: ["Basketball", "Soccer/Football", "Tennis", "Cricket"], answer: 1 },
+                    { question: "In which year were the first modern Olympics held?", options: ["1892", "1896", "1900", "1904"], answer: 1 },
+                    { question: "What is the maximum score in a single frame of bowling?", options: ["10", "20", "30", "50"], answer: 2 },
+                    { question: "Which tennis Grand Slam is played on clay?", options: ["Wimbledon", "US Open", "Australian Open", "French Open"], answer: 3 },
+                    { question: "How long is an Olympic swimming pool in meters?", options: ["25", "50", "75", "100"], answer: 1 },
+                    { question: "What country is the origin of the sport of polo?", options: ["England", "Argentina", "Persia/Iran", "India"], answer: 2 },
+                    { question: "Which athlete has won the most Olympic gold medals?", options: ["Usain Bolt", "Michael Phelps", "Carl Lewis", "Mark Spitz"], answer: 1 },
+                    { question: "What sport uses the terms 'love' and 'deuce'?", options: ["Badminton", "Table Tennis", "Tennis", "Squash"], answer: 2 },
+                    { question: "How many players are on a baseball team on the field?", options: ["7", "8", "9", "10"], answer: 2 },
+                    { question: "Which country has hosted the most Olympic Games?", options: ["USA", "UK", "France", "Japan"], answer: 0 },
+                    { question: "What is the term for three strikes in a row in bowling?", options: ["Hat trick", "Turkey", "Triple", "Trifecta"], answer: 1 },
+                    { question: "In which sport do you use a puck?", options: ["Field Hockey", "Ice Hockey", "Lacrosse", "Polo"], answer: 1 },
+                    { question: "What martial art originated in Korea?", options: ["Karate", "Judo", "Kung Fu", "Taekwondo"], answer: 3 },
+                ]
+            },
+            movies: {
+                name: "Movies & TV",
+                icon: "fa-film",
+                questions: [
+                    { question: "Who directed Titanic?", options: ["Steven Spielberg", "James Cameron", "Christopher Nolan", "Martin Scorsese"], answer: 1 },
+                    { question: "What is the highest-grossing film of all time?", options: ["Titanic", "Avatar", "Avengers: Endgame", "Star Wars"], answer: 1 },
+                    { question: "Which movie features the quote 'I'll be back'?", options: ["Die Hard", "Terminator", "Predator", "Rambo"], answer: 1 },
+                    { question: "What year was the first Harry Potter movie released?", options: ["1999", "2000", "2001", "2002"], answer: 2 },
+                    { question: "Who played Jack in Titanic?", options: ["Brad Pitt", "Tom Cruise", "Leonardo DiCaprio", "Johnny Depp"], answer: 2 },
+                    { question: "What is the name of the fictional African country in Black Panther?", options: ["Zamunda", "Wakanda", "Genovia", "Latveria"], answer: 1 },
+                    { question: "Which movie features a character named Darth Vader?", options: ["Star Trek", "Star Wars", "Stargate", "Battlestar Galactica"], answer: 1 },
+                    { question: "Who directed The Dark Knight trilogy?", options: ["Zack Snyder", "Tim Burton", "Christopher Nolan", "Matt Reeves"], answer: 2 },
+                    { question: "What is the name of the main character in The Matrix?", options: ["Morpheus", "Neo", "Trinity", "Agent Smith"], answer: 1 },
+                    { question: "Which animated movie features a fish named Nemo?", options: ["Shark Tale", "Finding Nemo", "The Little Mermaid", "Moana"], answer: 1 },
+                    { question: "Who plays Iron Man in the Marvel movies?", options: ["Chris Evans", "Chris Hemsworth", "Robert Downey Jr.", "Mark Ruffalo"], answer: 2 },
+                    { question: "What year was the original Jurassic Park released?", options: ["1991", "1993", "1995", "1997"], answer: 1 },
+                    { question: "Which movie won Best Picture at the 2020 Oscars?", options: ["1917", "Joker", "Parasite", "Once Upon a Time in Hollywood"], answer: 2 },
+                    { question: "Who plays the Joker in The Dark Knight?", options: ["Jared Leto", "Joaquin Phoenix", "Heath Ledger", "Jack Nicholson"], answer: 2 },
+                    { question: "What is the name of Batman's butler?", options: ["Jarvis", "Alfred", "Edwin", "Geoffrey"], answer: 1 },
+                    { question: "Which movie features the song 'My Heart Will Go On'?", options: ["Ghost", "Titanic", "The Notebook", "A Walk to Remember"], answer: 1 },
+                    { question: "Who directed Inception?", options: ["Steven Spielberg", "James Cameron", "Christopher Nolan", "Ridley Scott"], answer: 2 },
+                    { question: "What is the name of the toy cowboy in Toy Story?", options: ["Woody", "Buzz", "Rex", "Slinky"], answer: 0 },
+                    { question: "Which TV show features dragons and the Iron Throne?", options: ["The Witcher", "Game of Thrones", "Lord of the Rings", "Vikings"], answer: 1 },
+                    { question: "Who plays Captain Jack Sparrow?", options: ["Orlando Bloom", "Johnny Depp", "Jude Law", "Colin Farrell"], answer: 1 },
+                    { question: "What year was the first Avengers movie released?", options: ["2010", "2011", "2012", "2013"], answer: 2 },
+                    { question: "Which movie features the character Forrest Gump?", options: ["Cast Away", "The Green Mile", "Forrest Gump", "Big"], answer: 2 },
+                    { question: "Who directed Pulp Fiction?", options: ["Martin Scorsese", "Quentin Tarantino", "David Fincher", "Coen Brothers"], answer: 1 },
+                    { question: "What is the name of the princess in Frozen?", options: ["Anna", "Elsa", "Aurora", "Rapunzel"], answer: 1 },
+                    { question: "Which superhero is known as the 'Man of Steel'?", options: ["Batman", "Iron Man", "Superman", "Captain America"], answer: 2 },
+                    { question: "What TV show features a chemistry teacher turned drug lord?", options: ["Ozark", "Breaking Bad", "Narcos", "The Wire"], answer: 1 },
+                    { question: "Who plays Hermione in the Harry Potter films?", options: ["Emma Stone", "Emma Watson", "Emily Blunt", "Saoirse Ronan"], answer: 1 },
+                    { question: "Which movie features the quote 'Here's looking at you, kid'?", options: ["Gone with the Wind", "Casablanca", "The Maltese Falcon", "Citizen Kane"], answer: 1 },
+                    { question: "What is the name of Simba's father in The Lion King?", options: ["Scar", "Mufasa", "Rafiki", "Zazu"], answer: 1 },
+                    { question: "Who directed the Lord of the Rings trilogy?", options: ["Peter Jackson", "Guillermo del Toro", "Ridley Scott", "George Lucas"], answer: 0 },
+                ]
+            },
+            history: {
+                name: "History",
+                icon: "fa-landmark",
+                questions: [
+                    { question: "Who was the first President of the United States?", options: ["Thomas Jefferson", "John Adams", "George Washington", "Benjamin Franklin"], answer: 2 },
+                    { question: "In which year did the French Revolution begin?", options: ["1776", "1789", "1799", "1804"], answer: 1 },
+                    { question: "Who discovered America in 1492?", options: ["Vasco da Gama", "Ferdinand Magellan", "Christopher Columbus", "Amerigo Vespucci"], answer: 2 },
+                    { question: "Which empire was ruled by Julius Caesar?", options: ["Greek Empire", "Roman Empire", "Ottoman Empire", "Persian Empire"], answer: 1 },
+                    { question: "What year did the Berlin Wall fall?", options: ["1987", "1989", "1991", "1993"], answer: 1 },
+                    { question: "Who was the first woman to fly solo across the Atlantic?", options: ["Harriet Quimby", "Amelia Earhart", "Bessie Coleman", "Jacqueline Cochran"], answer: 1 },
+                    { question: "Which ancient wonder was located in Alexandria?", options: ["Hanging Gardens", "Colossus", "Lighthouse", "Mausoleum"], answer: 2 },
+                    { question: "What was the name of the ship on which the Pilgrims traveled to America?", options: ["Santa Maria", "Mayflower", "Endeavour", "Beagle"], answer: 1 },
+                    { question: "Who was the British Prime Minister during World War II?", options: ["Neville Chamberlain", "Winston Churchill", "Clement Attlee", "Anthony Eden"], answer: 1 },
+                    { question: "In which year did India gain independence?", options: ["1945", "1947", "1949", "1950"], answer: 1 },
+                    { question: "Who built the Great Wall of China?", options: ["Ming Dynasty", "Qin Dynasty", "Han Dynasty", "Tang Dynasty"], answer: 1 },
+                    { question: "What ancient civilization built the pyramids?", options: ["Romans", "Greeks", "Egyptians", "Mayans"], answer: 2 },
+                    { question: "Who wrote the Declaration of Independence?", options: ["George Washington", "Benjamin Franklin", "Thomas Jefferson", "John Adams"], answer: 2 },
+                    { question: "In which city was JFK assassinated?", options: ["Los Angeles", "New York", "Dallas", "Chicago"], answer: 2 },
+                    { question: "What year did man first walk on the moon?", options: ["1967", "1969", "1971", "1973"], answer: 1 },
+                    { question: "Who was known as the 'Iron Lady'?", options: ["Queen Victoria", "Margaret Thatcher", "Indira Gandhi", "Golda Meir"], answer: 1 },
+                    { question: "Which war was fought between the North and South in America?", options: ["Revolutionary War", "Civil War", "World War I", "War of 1812"], answer: 1 },
+                    { question: "Who was the first Emperor of China?", options: ["Qin Shi Huang", "Han Wudi", "Kublai Khan", "Sun Yat-sen"], answer: 0 },
+                    { question: "What year did the Titanic sink?", options: ["1910", "1912", "1914", "1916"], answer: 1 },
+                    { question: "Who painted the ceiling of the Sistine Chapel?", options: ["Leonardo da Vinci", "Raphael", "Michelangelo", "Donatello"], answer: 2 },
+                    { question: "Which country was Adolf Hitler born in?", options: ["Germany", "Austria", "Poland", "Switzerland"], answer: 1 },
+                    { question: "What was the name of the last Queen of France?", options: ["Marie Curie", "Marie Antoinette", "Catherine de Medici", "Anne of Austria"], answer: 1 },
+                    { question: "In which year did the Soviet Union collapse?", options: ["1989", "1990", "1991", "1992"], answer: 2 },
+                    { question: "Who was the Greek god of the sea?", options: ["Zeus", "Hades", "Poseidon", "Apollo"], answer: 2 },
+                    { question: "What ancient city was buried by Mount Vesuvius?", options: ["Rome", "Athens", "Pompeii", "Carthage"], answer: 2 },
+                    { question: "Who was the leader of the Soviet Union during World War II?", options: ["Lenin", "Stalin", "Khrushchev", "Trotsky"], answer: 1 },
+                    { question: "In which country did the Renaissance begin?", options: ["France", "England", "Italy", "Spain"], answer: 2 },
+                    { question: "Who discovered gravity?", options: ["Galileo", "Newton", "Einstein", "Copernicus"], answer: 1 },
+                    { question: "What was the Cold War primarily between?", options: ["USA and China", "USA and USSR", "UK and Germany", "France and Russia"], answer: 1 },
+                    { question: "Who was Cleopatra?", options: ["Greek Queen", "Roman Empress", "Egyptian Queen", "Persian Princess"], answer: 2 },
+                ]
+            },
+            geography: {
+                name: "Geography",
+                icon: "fa-earth-americas",
+                questions: [
+                    { question: "What is the capital of Brazil?", options: ["Rio de Janeiro", "São Paulo", "Brasília", "Salvador"], answer: 2 },
+                    { question: "Which is the largest continent?", options: ["Africa", "North America", "Europe", "Asia"], answer: 3 },
+                    { question: "What is the longest river in Africa?", options: ["Congo", "Niger", "Nile", "Zambezi"], answer: 2 },
+                    { question: "Which country has the most islands?", options: ["Indonesia", "Philippines", "Sweden", "Japan"], answer: 2 },
+                    { question: "What is the smallest continent?", options: ["Europe", "Australia", "Antarctica", "South America"], answer: 1 },
+                    { question: "Which country is known as the 'Land of the Rising Sun'?", options: ["China", "Korea", "Japan", "Thailand"], answer: 2 },
+                    { question: "What is the capital of Egypt?", options: ["Alexandria", "Cairo", "Luxor", "Giza"], answer: 1 },
+                    { question: "Which ocean lies between Europe and America?", options: ["Pacific", "Indian", "Atlantic", "Arctic"], answer: 2 },
+                    { question: "What is the driest continent on Earth?", options: ["Africa", "Australia", "Antarctica", "Asia"], answer: 2 },
+                    { question: "Which country is home to the Great Barrier Reef?", options: ["Indonesia", "Philippines", "Australia", "New Zealand"], answer: 2 },
+                    { question: "What is the capital of South Korea?", options: ["Busan", "Seoul", "Incheon", "Daegu"], answer: 1 },
+                    { question: "Which African country was never colonized?", options: ["Kenya", "Ethiopia", "Nigeria", "South Africa"], answer: 1 },
+                    { question: "What is the largest island in the world?", options: ["Madagascar", "Borneo", "Greenland", "New Guinea"], answer: 2 },
+                    { question: "Which country has the longest coastline?", options: ["USA", "Russia", "Canada", "Australia"], answer: 2 },
+                    { question: "What is the capital of Argentina?", options: ["Santiago", "Buenos Aires", "Montevideo", "Lima"], answer: 1 },
+                    { question: "Which river flows through Paris?", options: ["Rhine", "Thames", "Seine", "Danube"], answer: 2 },
+                    { question: "What is the highest waterfall in the world?", options: ["Niagara Falls", "Victoria Falls", "Angel Falls", "Iguazu Falls"], answer: 2 },
+                    { question: "Which country is known as the 'Pearl of the Orient'?", options: ["Japan", "Philippines", "Hong Kong", "Singapore"], answer: 2 },
+                    { question: "What is the capital of New Zealand?", options: ["Auckland", "Wellington", "Christchurch", "Hamilton"], answer: 1 },
+                    { question: "Which strait separates Europe from Africa?", options: ["Bering Strait", "Gibraltar Strait", "Malacca Strait", "Hormuz Strait"], answer: 1 },
+                    { question: "What is the largest lake in Africa?", options: ["Lake Chad", "Lake Tanganyika", "Lake Victoria", "Lake Malawi"], answer: 2 },
+                    { question: "Which mountain range separates Europe from Asia?", options: ["Alps", "Himalayas", "Ural Mountains", "Carpathians"], answer: 2 },
+                    { question: "What is the capital of Thailand?", options: ["Hanoi", "Bangkok", "Jakarta", "Manila"], answer: 1 },
+                    { question: "Which country is both in Europe and Asia?", options: ["Russia", "Turkey", "Kazakhstan", "All of the above"], answer: 3 },
+                    { question: "What is the deepest lake in the world?", options: ["Lake Superior", "Lake Baikal", "Lake Tanganyika", "Crater Lake"], answer: 1 },
+                    { question: "Which desert is the largest hot desert in the world?", options: ["Arabian", "Gobi", "Kalahari", "Sahara"], answer: 3 },
+                    { question: "What is the capital of Kenya?", options: ["Lagos", "Nairobi", "Addis Ababa", "Kampala"], answer: 1 },
+                    { question: "Which country is home to Mount Kilimanjaro?", options: ["Kenya", "Tanzania", "Uganda", "Ethiopia"], answer: 1 },
+                    { question: "What is the capital of Sweden?", options: ["Oslo", "Copenhagen", "Stockholm", "Helsinki"], answer: 2 },
+                    { question: "Which river is the longest in South America?", options: ["Orinoco", "Paraná", "Amazon", "São Francisco"], answer: 2 },
+                ]
+            },
+            music: {
+                name: "Music",
+                icon: "fa-music",
+                questions: [
+                    { question: "Who is known as the 'King of Pop'?", options: ["Elvis Presley", "Michael Jackson", "Prince", "Freddie Mercury"], answer: 1 },
+                    { question: "Which band performed 'Bohemian Rhapsody'?", options: ["The Beatles", "Led Zeppelin", "Queen", "Pink Floyd"], answer: 2 },
+                    { question: "What instrument does a pianist play?", options: ["Guitar", "Violin", "Piano", "Drums"], answer: 2 },
+                    { question: "Which country is K-Pop from?", options: ["Japan", "China", "South Korea", "Thailand"], answer: 2 },
+                    { question: "Who sang 'Shape of You'?", options: ["Justin Bieber", "Ed Sheeran", "Bruno Mars", "The Weeknd"], answer: 1 },
+                    { question: "What is the name of Taylor Swift's re-recorded album with '(Taylor's Version)'?", options: ["1989", "All of them", "Red", "Fearless"], answer: 1 },
+                    { question: "Which artist released the album 'Thriller'?", options: ["Prince", "Michael Jackson", "Whitney Houston", "Madonna"], answer: 1 },
+                    { question: "How many members are in BTS?", options: ["5", "6", "7", "8"], answer: 2 },
+                    { question: "Who is the lead singer of Coldplay?", options: ["Bono", "Chris Martin", "Thom Yorke", "Brandon Flowers"], answer: 1 },
+                    { question: "What music genre is Bob Marley associated with?", options: ["Jazz", "Blues", "Reggae", "Soul"], answer: 2 },
+                    { question: "Which instrument has 88 keys?", options: ["Guitar", "Violin", "Piano", "Accordion"], answer: 2 },
+                    { question: "Who is known as the 'Queen of Soul'?", options: ["Whitney Houston", "Aretha Franklin", "Diana Ross", "Tina Turner"], answer: 1 },
+                    { question: "What band was John Lennon a member of?", options: ["The Rolling Stones", "The Who", "The Beatles", "Led Zeppelin"], answer: 2 },
+                    { question: "Which artist sang 'Bad Guy'?", options: ["Ariana Grande", "Billie Eilish", "Dua Lipa", "Halsey"], answer: 1 },
+                    { question: "What is Adele's full name?", options: ["Adele Williams", "Adele Adkins", "Adele Smith", "Adele Johnson"], answer: 1 },
+                    { question: "Which rapper is known as 'Slim Shady'?", options: ["Jay-Z", "Kanye West", "Eminem", "50 Cent"], answer: 2 },
+                    { question: "What genre is Beethoven associated with?", options: ["Jazz", "Classical", "Rock", "Pop"], answer: 1 },
+                    { question: "Who sang 'Rolling in the Deep'?", options: ["Beyoncé", "Rihanna", "Adele", "Lady Gaga"], answer: 2 },
+                    { question: "Which festival is held in the Nevada desert?", options: ["Coachella", "Burning Man", "Lollapalooza", "Glastonbury"], answer: 1 },
+                    { question: "What nationality was Mozart?", options: ["German", "Austrian", "Italian", "French"], answer: 1 },
+                    { question: "Who is the most-streamed artist on Spotify (as of 2023)?", options: ["Ed Sheeran", "The Weeknd", "Taylor Swift", "Drake"], answer: 1 },
+                    { question: "What year did Spotify launch?", options: ["2006", "2008", "2010", "2012"], answer: 1 },
+                    { question: "Which artist is known for the song 'Purple Rain'?", options: ["Michael Jackson", "Prince", "David Bowie", "Elton John"], answer: 1 },
+                    { question: "What instrument is Yo-Yo Ma famous for playing?", options: ["Violin", "Piano", "Cello", "Flute"], answer: 2 },
+                    { question: "Which band released 'Stairway to Heaven'?", options: ["Pink Floyd", "The Who", "Led Zeppelin", "Black Sabbath"], answer: 2 },
+                    { question: "Who is the richest musician in the world?", options: ["Paul McCartney", "Jay-Z", "Rihanna", "Kanye West"], answer: 2 },
+                    { question: "What does 'R&B' stand for?", options: ["Rock and Blues", "Rhythm and Blues", "Rap and Beat", "Real and Bold"], answer: 1 },
+                    { question: "Which artist performed the Super Bowl halftime show in 2023?", options: ["Shakira", "Rihanna", "Beyoncé", "Jennifer Lopez"], answer: 1 },
+                    { question: "What is the name of Lady Gaga's fanbase?", options: ["Swifties", "Little Monsters", "BeyHive", "Arianators"], answer: 1 },
+                    { question: "Who composed 'The Four Seasons'?", options: ["Bach", "Mozart", "Vivaldi", "Handel"], answer: 2 },
+                ]
+            }
+        };
+        
+        // Function to get random questions from a category
+        const getRandomQuestions = (categoryKey, count = 5) => {
+            let allQuestions = [];
+            
+            if (categoryKey === 'mixed') {
+                // Get questions from all categories
+                Object.keys(QUIZ_CATEGORIES).forEach(key => {
+                    if (key !== 'mixed') {
+                        allQuestions = allQuestions.concat(
+                            QUIZ_CATEGORIES[key].questions.map(q => ({
+                                ...q,
+                                category: QUIZ_CATEGORIES[key].name
+                            }))
+                        );
+                    }
+                });
+            } else {
+                allQuestions = [...QUIZ_CATEGORIES[categoryKey].questions];
+            }
+            
+            const shuffled = allQuestions.sort(() => Math.random() - 0.5);
+            return shuffled.slice(0, Math.min(count, shuffled.length)).map((q, index) => ({
+                ...q,
+                id: index + 1
+            }));
+        };
+        
+        // Add Mixed category
+        QUIZ_CATEGORIES.mixed = {
+            name: "Mixed (All Categories)",
+            icon: "fa-shuffle",
+            questions: [] // Will be populated dynamically
+        };
+
+        // ============== P2P REAL-TIME CONNECTION ==============
+        class RealTimeConnection {
+            constructor(onMessage, onConnectionChange) {
+                this.peer = null;
+                this.connections = new Map();
+                this.onMessage = onMessage;
+                this.onConnectionChange = onConnectionChange;
+                this.myId = null;
+                this.isHost = false;
+                this.roomCode = null;
+            }
+
+            generateRoomCode() {
+                return Math.random().toString(36).substr(2, 6).toUpperCase();
+            }
+
+            async createRoom() {
+                return new Promise((resolve, reject) => {
+                    this.roomCode = this.generateRoomCode();
+                    this.isHost = true;
+                    
+                    // Create peer with room code as ID
+                    this.peer = new Peer('quizblitz-' + this.roomCode, {
+                        debug: 0
+                    });
+
+                    this.peer.on('open', (id) => {
+                        this.myId = id;
+                        this.onConnectionChange('connected');
+                        resolve(this.roomCode);
+                    });
+
+                    this.peer.on('connection', (conn) => {
+                        this.handleNewConnection(conn);
+                    });
+
+                    this.peer.on('error', (err) => {
+                        console.error('Peer error:', err);
+                        if (err.type === 'unavailable-id') {
+                            reject(new Error('Room code already in use. Try again.'));
+                        } else {
+                            reject(err);
+                        }
+                    });
+
+                    this.peer.on('disconnected', () => {
+                        this.onConnectionChange('disconnected');
+                    });
+                });
+            }
+
+            async joinRoom(roomCode) {
+                return new Promise((resolve, reject) => {
+                    this.roomCode = roomCode.toUpperCase();
+                    this.isHost = false;
+                    
+                    // Generate unique ID for this player
+                    const uniqueId = 'player-' + Math.random().toString(36).substr(2, 9);
+                    
+                    this.peer = new Peer(uniqueId, {
+                        debug: 0
+                    });
+
+                    this.peer.on('open', (id) => {
+                        this.myId = id;
+                        
+                        // Connect to the host
+                        const conn = this.peer.connect('quizblitz-' + this.roomCode, {
+                            reliable: true
+                        });
+
+                        conn.on('open', () => {
+                            this.connections.set('host', conn);
+                            this.onConnectionChange('connected');
+                            resolve(this.roomCode);
+                        });
+
+                        conn.on('data', (data) => {
+                            this.onMessage(data);
+                        });
+
+                        conn.on('close', () => {
+                            this.connections.delete('host');
+                            this.onConnectionChange('disconnected');
+                        });
+
+                        conn.on('error', (err) => {
+                            reject(new Error('Failed to connect to room'));
+                        });
+                    });
+
+                    this.peer.on('error', (err) => {
+                        console.error('Peer error:', err);
+                        if (err.type === 'peer-unavailable') {
+                            reject(new Error('Room not found. Check the code and try again.'));
+                        } else {
+                            reject(err);
+                        }
+                    });
+
+                    // Timeout for connection
+                    setTimeout(() => {
+                        if (this.connections.size === 0) {
+                            reject(new Error('Connection timeout. Room may not exist.'));
+                        }
+                    }, 10000);
+                });
+            }
+
+            handleNewConnection(conn) {
+                conn.on('open', () => {
+                    this.connections.set(conn.peer, conn);
+                    this.onConnectionChange('connected');
+                    
+                    // Notify about new connection
+                    this.onMessage({ type: 'peer_connected', peerId: conn.peer });
+                });
+
+                conn.on('data', (data) => {
+                    // If host, broadcast to all other peers
+                    if (this.isHost && data.broadcast) {
+                        this.broadcast(data, conn.peer);
+                    }
+                    this.onMessage(data);
+                });
+
+                conn.on('close', () => {
+                    this.connections.delete(conn.peer);
+                    this.onMessage({ type: 'peer_disconnected', peerId: conn.peer });
+                });
+            }
+
+            send(data) {
+                const message = { ...data, senderId: this.myId, timestamp: Date.now() };
+                
+                if (this.isHost) {
+                    // Host broadcasts to all
+                    this.connections.forEach((conn) => {
+                        if (conn.open) {
+                            conn.send(message);
+                        }
+                    });
+                } else {
+                    // Player sends to host
+                    const hostConn = this.connections.get('host');
+                    if (hostConn && hostConn.open) {
+                        hostConn.send({ ...message, broadcast: true });
+                    }
+                }
+            }
+
+            broadcast(data, excludePeerId = null) {
+                this.connections.forEach((conn, peerId) => {
+                    if (peerId !== excludePeerId && conn.open) {
+                        conn.send(data);
+                    }
+                });
+            }
+
+            disconnect() {
+                this.connections.forEach((conn) => conn.close());
+                if (this.peer) {
+                    this.peer.destroy();
+                }
+            }
+
+            getConnectionCount() {
+                return this.connections.size;
+            }
+        }
+
+        // ============== CONFETTI COMPONENT ==============
+        const Confetti = ({ active }) => {
+            const [particles, setParticles] = useState([]);
+
+            useEffect(() => {
+                if (active) {
+                    const colors = ['#f43f5e', '#8b5cf6', '#06b6d4', '#22c55e', '#eab308', '#f97316'];
+                    const newParticles = Array.from({ length: 50 }, (_, i) => ({
+                        id: i,
+                        left: Math.random() * 100,
+                        color: colors[Math.floor(Math.random() * colors.length)],
+                        delay: Math.random() * 2,
+                        size: Math.random() * 8 + 5
+                    }));
+                    setParticles(newParticles);
+                }
+            }, [active]);
+
+            if (!active) return null;
+
+            return (
+                <>
+                    {particles.map((p) => (
+                        <div
+                            key={p.id}
+                            className="confetti"
+                            style={{
+                                left: `${p.left}%`,
+                                backgroundColor: p.color,
+                                width: p.size,
+                                height: p.size,
+                                animationDelay: `${p.delay}s`,
+                                borderRadius: Math.random() > 0.5 ? '50%' : '0'
+                            }}
+                        />
+                    ))}
+                </>
+            );
+        };
+
+        // ============== MAIN APP COMPONENT ==============
+        const App = () => {
+            // Views: login, lobby, category, room, game, intermission, leaderboard
+            const [view, setView] = useState('login');
+            const [user, setUser] = useState(null);
+            const [connection, setConnection] = useState(null);
+            const [connectionStatus, setConnectionStatus] = useState('disconnected');
+            const [room, setRoom] = useState(null);
+            const [error, setError] = useState(null);
+            const [selectedCategory, setSelectedCategory] = useState(null);
+            const [questionCount, setQuestionCount] = useState(10);
+            const [timePerQuestion, setTimePerQuestion] = useState(15);
+            const [intermissionTime, setIntermissionTime] = useState(4);
+            
+            const [gameState, setGameState] = useState({
+                players: [],
+                currentQuestionIndex: 0,
+                timeLeft: 15,
+                status: 'waiting',
+                scores: {},
+                currentQuestion: null,
+                submitted: false,
+                myAnswer: null,
+                correctAnswer: null,
+                answers: {},
+                questions: []
+            });
+
+            const timerRef = useRef(null);
+            const gameStateRef = useRef(gameState);
+            
+            useEffect(() => {
+                gameStateRef.current = gameState;
+            }, [gameState]);
+
+            // ============== MESSAGE HANDLER ==============
+            const handleMessage = useCallback((data) => {
+                console.log('Received:', data);
+
+                switch (data.type) {
+                    case 'player_joined':
+                        setGameState(prev => {
+                            if (prev.players.find(p => p.id === data.player.id)) return prev;
+                            const newPlayers = [...prev.players, data.player];
+                            const newScores = { ...prev.scores, [data.player.id]: 0 };
+                            return { ...prev, players: newPlayers, scores: newScores };
+                        });
+                        break;
+
+                    case 'player_left':
+                        setGameState(prev => ({
+                            ...prev,
+                            players: prev.players.filter(p => p.id !== data.playerId)
+                        }));
+                        break;
+
+                    case 'room_sync':
+                        setGameState(prev => ({
+                            ...prev,
+                            players: data.players,
+                            scores: data.scores,
+                            status: data.status
+                        }));
+                        if (data.category) {
+                            setSelectedCategory(data.category);
+                        }
+                        if (data.timePerQuestion) {
+                            setTimePerQuestion(data.timePerQuestion);
+                        }
+                        if (data.questionCount) {
+                            setQuestionCount(data.questionCount);
+                        }
+                        if (data.intermissionTime) {
+                            setIntermissionTime(data.intermissionTime);
+                        }
+                        break;
+
+                    case 'game_started':
+                        setSelectedCategory(data.category);
+                        setTimePerQuestion(data.timePerQuestion || 15);
+                        setGameState(prev => ({
+                            ...prev,
+                            status: 'playing',
+                            questions: data.questions,
+                            currentQuestion: data.questions[0],
+                            currentQuestionIndex: 0,
+                            timeLeft: data.timePerQuestion || 15,
+                            maxTime: data.timePerQuestion || 15,
+                            submitted: false,
+                            myAnswer: null,
+                            correctAnswer: null,
+                            answers: {}
+                        }));
+                        setView('game');
+                        break;
+
+                    case 'tick':
+                        setGameState(prev => ({ ...prev, timeLeft: data.timeLeft }));
+                        break;
+
+                    case 'answer_submitted':
+                        setGameState(prev => ({
+                            ...prev,
+                            answers: { ...prev.answers, [data.playerId]: data.answerIndex }
+                        }));
+                        break;
+
+                    case 'question_ended':
+                        setGameState(prev => ({
+                            ...prev,
+                            status: 'intermission',
+                            correctAnswer: data.correctAnswer,
+                            scores: data.scores
+                        }));
+                        setView('intermission');
+                        break;
+
+                    case 'next_question':
+                        setGameState(prev => ({
+                            ...prev,
+                            status: 'playing',
+                            currentQuestion: prev.questions[data.index],
+                            currentQuestionIndex: data.index,
+                            timeLeft: prev.maxTime || timePerQuestion,
+                            submitted: false,
+                            myAnswer: null,
+                            correctAnswer: null,
+                            answers: {}
+                        }));
+                        setView('game');
+                        break;
+
+                    case 'game_over':
+                        setGameState(prev => ({
+                            ...prev,
+                            status: 'finished',
+                            scores: data.scores
+                        }));
+                        setView('leaderboard');
+                        break;
+
+                    case 'peer_connected':
+                        // Host syncs new player
+                        if (room?.isHost) {
+                            connection.send({
+                                type: 'room_sync',
+                                players: gameStateRef.current.players,
+                                scores: gameStateRef.current.scores,
+                                status: gameStateRef.current.status,
+                                category: selectedCategory,
+                                timePerQuestion,
+                                questionCount,
+                                intermissionTime
+                            });
+                        }
+                        break;
+
+                    case 'peer_disconnected':
+                        setGameState(prev => ({
+                            ...prev,
+                            players: prev.players.filter(p => p.peerId !== data.peerId)
+                        }));
+                        break;
+                }
+            }, [room, connection, selectedCategory]);
+
+            // ============== CONNECTION HANDLER ==============
+            const handleConnectionChange = useCallback((status) => {
+                setConnectionStatus(status);
+            }, []);
+
+            // ============== LOGIN ==============
+            const login = (username) => {
+                const userId = 'user-' + Math.random().toString(36).substr(2, 9);
+                setUser({ username, id: userId });
+                setView('lobby');
+            };
+
+            // ============== CREATE ROOM ==============
+            const createRoom = async () => {
+                try {
+                    setError(null);
+                    setConnectionStatus('connecting');
+                    
+                    const conn = new RealTimeConnection(handleMessage, handleConnectionChange);
+                    const roomCode = await conn.createRoom();
+                    
+                    setConnection(conn);
+                    setRoom({ code: roomCode, isHost: true });
+                    
+                    // Initialize game state with host as first player
+                    setGameState({
+                        players: [{ ...user, peerId: conn.myId }],
+                        currentQuestionIndex: 0,
+                        timeLeft: 15,
+                        status: 'waiting',
+                        scores: { [user.id]: 0 },
+                        currentQuestion: null,
+                        submitted: false,
+                        myAnswer: null,
+                        correctAnswer: null,
+                        answers: {},
+                        questions: []
+                    });
+                    
+                    setView('category');
+                } catch (err) {
+                    setError(err.message);
+                    setConnectionStatus('disconnected');
+                }
+            };
+
+            // ============== JOIN ROOM ==============
+            const joinRoom = async (code) => {
+                if (!code) {
+                    setError('Please enter a room code');
+                    return;
+                }
+                
+                try {
+                    setError(null);
+                    setConnectionStatus('connecting');
+                    
+                    const conn = new RealTimeConnection(handleMessage, handleConnectionChange);
+                    await conn.joinRoom(code);
+                    
+                    setConnection(conn);
+                    setRoom({ code: code.toUpperCase(), isHost: false });
+                    
+                    // Notify host about joining
+                    setTimeout(() => {
+                        conn.send({
+                            type: 'player_joined',
+                            player: { ...user, peerId: conn.myId }
+                        });
+                    }, 500);
+                    
+                    setGameState(prev => ({
+                        ...prev,
+                        players: [{ ...user, peerId: conn.myId }],
+                        scores: { [user.id]: 0 }
+                    }));
+                    
+                    setView('room');
+                } catch (err) {
+                    setError(err.message);
+                    setConnectionStatus('disconnected');
+                }
+            };
+
+            // ============== SELECT CATEGORY ==============
+            const selectCategory = (categoryKey) => {
+                setSelectedCategory(categoryKey);
+                setView('room');
+            };
+
+            // ============== START GAME ==============
+            const startGame = () => {
+                if (!room?.isHost || !selectedCategory) return;
+                
+                // Use the new randomization function to get different questions each time
+                const questions = getRandomQuestions(selectedCategory, questionCount);
+                
+                // Initialize scores for all players
+                const initialScores = {};
+                gameState.players.forEach(p => {
+                    initialScores[p.id] = 0;
+                });
+                
+                setGameState(prev => ({
+                    ...prev,
+                    questions,
+                    currentQuestion: questions[0],
+                    currentQuestionIndex: 0,
+                    timeLeft: timePerQuestion,
+                    maxTime: timePerQuestion,
+                    status: 'playing',
+                    scores: initialScores,
+                    submitted: false,
+                    myAnswer: null,
+                    correctAnswer: null,
+                    answers: {}
+                }));
+                
+                connection.send({
+                    type: 'game_started',
+                    category: selectedCategory,
+                    questions,
+                    timePerQuestion
+                });
+                
+                setView('game');
+                runTimer(0, questions, timePerQuestion);
+            };
+
+            // ============== TIMER ==============
+            const runTimer = (questionIndex, questions, duration = 15) => {
+                let time = duration;
+                
+                if (timerRef.current) clearInterval(timerRef.current);
+                
+                timerRef.current = setInterval(() => {
+                    time--;
+                    
+                    setGameState(prev => ({ ...prev, timeLeft: time }));
+                    connection.send({ type: 'tick', timeLeft: time });
+                    
+                    if (time <= 0) {
+                        clearInterval(timerRef.current);
+                        endQuestion(questionIndex, questions, duration);
+                    }
+                }, 1000);
+            };
+
+            // ============== END QUESTION ==============
+            const endQuestion = (questionIndex, questions, duration = 15) => {
+                const question = questions[questionIndex];
+                const currentScores = { ...gameStateRef.current.scores };
+                const answers = gameStateRef.current.answers;
+                
+                // Calculate scores based on answers
+                Object.entries(answers).forEach(([playerId, answerIndex]) => {
+                    if (answerIndex === question.answer) {
+                        currentScores[playerId] = (currentScores[playerId] || 0) + 10;
+                    }
+                });
+                
+                // Also check host's own answer
+                if (gameStateRef.current.myAnswer === question.answer) {
+                    currentScores[user.id] = (currentScores[user.id] || 0) + 10;
+                }
+                
+                setGameState(prev => ({
+                    ...prev,
+                    status: 'intermission',
+                    correctAnswer: question.answer,
+                    scores: currentScores
+                }));
+                
+                connection.send({
+                    type: 'question_ended',
+                    correctAnswer: question.answer,
+                    scores: currentScores
+                });
+                
+                setView('intermission');
+                
+                const waitTime = (intermissionTime || 4) * 1000;
+                
+                setTimeout(() => {
+                    if (questionIndex + 1 >= questions.length) {
+                        // Game over
+                        setGameState(prev => ({ ...prev, status: 'finished' }));
+                        connection.send({ type: 'game_over', scores: currentScores });
+                        setView('leaderboard');
+                    } else {
+                        // Next question
+                        const nextIndex = questionIndex + 1;
+                        setGameState(prev => ({
+                            ...prev,
+                            status: 'playing',
+                            currentQuestion: questions[nextIndex],
+                            currentQuestionIndex: nextIndex,
+                            timeLeft: duration,
+                            submitted: false,
+                            myAnswer: null,
+                            correctAnswer: null,
+                            answers: {}
+                        }));
+                        connection.send({ type: 'next_question', index: nextIndex });
+                        setView('game');
+                        runTimer(nextIndex, questions, duration);
+                    }
+                }, waitTime);
+            };
+
+            // ============== SUBMIT ANSWER ==============
+            const submitAnswer = (answerIndex) => {
+                if (gameState.submitted) return;
+                
+                setGameState(prev => ({
+                    ...prev,
+                    submitted: true,
+                    myAnswer: answerIndex
+                }));
+                
+                connection.send({
+                    type: 'answer_submitted',
+                    playerId: user.id,
+                    answerIndex,
+                    timeLeft: gameState.timeLeft
+                });
+            };
+
+            // ============== PLAY AGAIN ==============
+            const playAgain = () => {
+                if (room?.isHost) {
+                    setView('category');
+                    setGameState(prev => ({
+                        ...prev,
+                        status: 'waiting',
+                        currentQuestionIndex: 0,
+                        timeLeft: 15,
+                        submitted: false,
+                        myAnswer: null,
+                        correctAnswer: null,
+                        questions: [],
+                        answers: {}
+                    }));
+                } else {
+                    setView('room');
+                }
+            };
+
+            // ============== EXIT ==============
+            const exitGame = () => {
+                if (connection) connection.disconnect();
+                window.location.reload();
+            };
+
+            // ============== RENDER ==============
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen p-4">
+                    {/* HEADER */}
+                    <div className="text-center mb-6">
+                        <h1 className="text-4xl md:text-6xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 drop-shadow-lg animate-float">
+                            <i className="fa-solid fa-bolt mr-3"></i>QuizBlitz
+                        </h1>
+                        <p className="text-gray-400 text-sm">Real-Time Multiplayer Quiz Game</p>
+                    </div>
+
+                    {/* CONNECTION STATUS */}
+                    {view !== 'login' && (
+                        <div className="flex items-center gap-2 mb-4 text-sm">
+                            <div className={`connection-dot ${connectionStatus}`}></div>
+                            <span className="text-gray-400 capitalize">{connectionStatus}</span>
+                            {room && <span className="text-cyan-400 font-mono ml-2">Room: {room.code}</span>}
+                        </div>
+                    )}
+
+                    {/* ERROR MESSAGE */}
+                    {error && (
+                        <div className="bg-red-500/20 border border-red-500 text-red-300 px-4 py-2 rounded-lg mb-4 animate-pop">
+                            <i className="fa-solid fa-circle-exclamation mr-2"></i>{error}
+                        </div>
+                    )}
+
+                    {/* MAIN PANEL */}
+                    <div className="w-full max-w-lg glass-panel rounded-2xl p-6 md:p-8 relative overflow-hidden">
+                        
+                        {/* ===== LOGIN VIEW ===== */}
+                        {view === 'login' && (
+                            <div className="animate-pop">
+                                <h2 className="text-2xl font-bold mb-6 text-center">
+                                    <i className="fa-solid fa-user-astronaut mr-2 text-cyan-400"></i>
+                                    Enter the Arena
+                                </h2>
+                                <form onSubmit={(e) => {
+                                    e.preventDefault();
+                                    const name = e.target.username.value.trim();
+                                    if (name) login(name);
+                                }} className="flex flex-col gap-4">
+                                    <input 
+                                        name="username" 
+                                        className="bg-white/10 border border-white/20 rounded-xl p-4 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 text-center text-lg"
+                                        placeholder="Your Nickname"
+                                        autoComplete="off"
+                                        maxLength="15"
+                                        required
+                                    />
+                                    <button className="btn-primary text-white font-bold py-4 rounded-xl text-lg">
+                                        <i className="fa-solid fa-play mr-2"></i>Start Playing
+                                    </button>
+                                </form>
+                                
+                                <div className="mt-8 text-center text-gray-500 text-xs">
+                                    <p>Play with friends anywhere in the world!</p>
+                                    <p className="mt-1">Just share your room code.</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== LOBBY VIEW ===== */}
+                        {view === 'lobby' && (
+                            <div className="animate-pop">
+                                <div className="text-center mb-6">
+                                    <div className="inline-block bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/30 px-6 py-3 rounded-full">
+                                        <span className="text-gray-400 text-sm">Playing as</span>
+                                        <div className="text-xl font-bold text-cyan-300">{user?.username}</div>
+                                    </div>
+                                </div>
+                                
+                                <div className="space-y-4">
+                                    <button 
+                                        onClick={createRoom}
+                                        disabled={connectionStatus === 'connecting'}
+                                        className="w-full btn-secondary text-white font-bold py-4 rounded-xl text-lg disabled:opacity-50"
+                                    >
+                                        {connectionStatus === 'connecting' ? (
+                                            <><i className="fa-solid fa-spinner fa-spin mr-2"></i>Creating...</>
+                                        ) : (
+                                            <><i className="fa-solid fa-plus mr-2"></i>Create Room</>
+                                        )}
+                                    </button>
+                                    
+                                    <div className="relative my-4">
+                                        <div className="absolute inset-0 flex items-center">
+                                            <div className="w-full border-t border-white/10"></div>
+                                        </div>
+                                        <div className="relative flex justify-center">
+                                            <span className="px-4 bg-[#2a2650] text-gray-500 text-sm rounded-full">OR JOIN</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <form onSubmit={(e) => {
+                                        e.preventDefault();
+                                        joinRoom(e.target.code.value);
+                                    }} className="flex gap-2">
+                                        <input 
+                                            name="code"
+                                            className="flex-1 bg-white/10 border border-white/20 rounded-xl p-4 text-center uppercase tracking-widest font-mono text-xl focus:ring-2 focus:ring-cyan-400 outline-none"
+                                            placeholder="CODE"
+                                            maxLength="6"
+                                        />
+                                        <button 
+                                            type="submit"
+                                            disabled={connectionStatus === 'connecting'}
+                                            className="btn-primary px-6 rounded-xl font-bold disabled:opacity-50"
+                                        >
+                                            {connectionStatus === 'connecting' ? (
+                                                <i className="fa-solid fa-spinner fa-spin"></i>
+                                            ) : (
+                                                'Join'
+                                            )}
+                                        </button>
+                                    </form>
+                                </div>
+                                
+                                <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl text-sm text-blue-300">
+                                    <i className="fa-solid fa-circle-info mr-2"></i>
+                                    <strong>How to play:</strong> Create a room, share the code with friends, and start quizzing!
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== CATEGORY SELECTION ===== */}
+                        {view === 'category' && (
+                            <div className="animate-pop">
+                                <h2 className="text-2xl font-bold mb-6 text-center">
+                                    <i className="fa-solid fa-layer-group mr-2 text-purple-400"></i>
+                                    Choose Category
+                                </h2>
+                                
+                                <div className="grid grid-cols-2 gap-3 mb-6 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                    {Object.entries(QUIZ_CATEGORIES).map(([key, cat]) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => selectCategory(key)}
+                                            className={`p-4 rounded-xl border-2 transition-all text-left
+                                                ${selectedCategory === key 
+                                                    ? 'border-cyan-400 bg-cyan-500/20' 
+                                                    : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'}`}
+                                        >
+                                            <i className={`fa-solid ${cat.icon} text-2xl mb-2 ${selectedCategory === key ? 'text-cyan-400' : 'text-gray-400'}`}></i>
+                                            <div className="font-medium text-sm">{cat.name}</div>
+                                            <div className="text-xs text-gray-500 mt-1">{key === 'mixed' ? '240+' : cat.questions.length} questions</div>
+                                        </button>
+                                    ))}
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">Number of Questions</label>
+                                    <div className="flex gap-2">
+                                        {[5, 10, 15, 20].map(num => (
+                                            <button
+                                                key={num}
+                                                onClick={() => setQuestionCount(num)}
+                                                className={`flex-1 py-2 rounded-lg font-bold transition-all ${
+                                                    questionCount === num 
+                                                        ? 'bg-cyan-500 text-black' 
+                                                        : 'bg-white/10 hover:bg-white/20'
+                                                }`}
+                                            >
+                                                {num}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">
+                                        <i className="fa-solid fa-clock mr-1"></i>Time Per Question (seconds)
+                                    </label>
+                                    <div className="flex gap-2">
+                                        {[10, 15, 20, 30].map(sec => (
+                                            <button
+                                                key={sec}
+                                                onClick={() => setTimePerQuestion(sec)}
+                                                className={`flex-1 py-2 rounded-lg font-bold transition-all ${
+                                                    timePerQuestion === sec 
+                                                        ? 'bg-purple-500 text-white' 
+                                                        : 'bg-white/10 hover:bg-white/20'
+                                                }`}
+                                            >
+                                                {sec}s
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">
+                                        <i className="fa-solid fa-eye mr-1"></i>Answer Reveal Delay (seconds)
+                                    </label>
+                                    <div className="flex gap-2">
+                                        {[2, 4, 6, 10].map(sec => (
+                                            <button
+                                                key={sec}
+                                                onClick={() => setIntermissionTime(sec)}
+                                                className={`flex-1 py-2 rounded-lg font-bold transition-all ${
+                                                    intermissionTime === sec 
+                                                        ? 'bg-pink-500 text-white' 
+                                                        : 'bg-white/10 hover:bg-white/20'
+                                                }`}
+                                            >
+                                                {sec}s
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                
+                                <div className="text-center text-gray-500 text-sm">
+                                    Room Code: <span className="font-mono text-cyan-400 text-lg">{room?.code}</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== ROOM WAITING ===== */}
+                        {view === 'room' && (
+                            <div className="animate-pop">
+                                <div className="flex justify-between items-center mb-4">
+                                    <button onClick={() => { connection?.disconnect(); setView('lobby'); }} className="text-gray-400 hover:text-white">
+                                        <i className="fa-solid fa-arrow-left"></i>
+                                    </button>
+                                    <div className="text-center">
+                                        <div className="text-xs text-gray-500 uppercase">Room Code</div>
+                                        <div className="text-3xl font-mono font-bold text-cyan-400 tracking-widest">{room?.code}</div>
+                                    </div>
+                                    <div className="w-6"></div>
+                                </div>
+                                
+                                {selectedCategory && (
+                                    <div className="text-center mb-4 p-3 bg-purple-500/20 rounded-lg">
+                                        <div className="flex items-center justify-center gap-4 flex-wrap">
+                                            <div className="flex items-center gap-2">
+                                                <i className={`fa-solid ${QUIZ_CATEGORIES[selectedCategory].icon} text-purple-400`}></i>
+                                                <span className="text-purple-300">{QUIZ_CATEGORIES[selectedCategory].name}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-sm">
+                                                <i className="fa-solid fa-clock text-cyan-400"></i>
+                                                <span className="text-cyan-300">{timePerQuestion}s per question</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-sm">
+                                                <i className="fa-solid fa-list-ol text-green-400"></i>
+                                                <span className="text-green-300">{questionCount} questions</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                <div className="bg-black/30 rounded-xl p-4 min-h-[180px] mb-6">
+                                    <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-3 flex items-center">
+                                        <i className="fa-solid fa-users mr-2"></i>
+                                        Players ({gameState.players.length})
+                                    </h3>
+                                    <div className="space-y-2 max-h-[150px] overflow-y-auto custom-scrollbar">
+                                        {gameState.players.map((p, i) => (
+                                            <div key={p.id} className="flex items-center gap-3 bg-white/5 p-3 rounded-lg animate-pop">
+                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center font-bold shadow-lg">
+                                                    {p.username[0].toUpperCase()}
+                                                </div>
+                                                <span className="font-medium flex-1">{p.username}</span>
+                                                {p.id === user?.id && <span className="text-xs bg-cyan-500/30 text-cyan-300 px-2 py-1 rounded">YOU</span>}
+                                                {i === 0 && <i className="fa-solid fa-crown text-yellow-400"></i>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                
+                                {room?.isHost ? (
+                                    <button 
+                                        onClick={startGame}
+                                        disabled={!selectedCategory}
+                                        className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 py-4 rounded-xl font-bold shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <i className="fa-solid fa-play mr-2"></i>Start Game
+                                    </button>
+                                ) : (
+                                    <div className="text-center p-4 bg-white/5 rounded-xl">
+                                        <div className="relative inline-block">
+                                            <div className="w-12 h-12 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
+                                        </div>
+                                        <p className="mt-3 text-gray-400">Waiting for host to start...</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ===== GAME PLAYING ===== */}
+                        {view === 'game' && gameState.currentQuestion && (
+                            <div className="animate-pop">
+                                <div className="flex justify-between items-center mb-4">
+                                    <span className="bg-purple-500/30 border border-purple-500 px-3 py-1 rounded-full text-xs font-bold">
+                                        Q{gameState.currentQuestionIndex + 1}/{gameState.questions.length}
+                                    </span>
+                                    <div className={`font-mono text-3xl font-bold tabular-nums ${gameState.timeLeft <= 5 ? 'text-red-400 animate-pulse' : 'text-cyan-400'}`}>
+                                        {gameState.timeLeft}
+                                    </div>
+                                </div>
+                                
+                                <div className="w-full bg-gray-700/50 h-2 rounded-full mb-6 overflow-hidden">
+                                    <div 
+                                        className={`h-full timer-bar rounded-full ${gameState.timeLeft <= 5 ? 'bg-red-500' : 'bg-cyan-400'}`}
+                                        style={{ width: `${(gameState.timeLeft / (gameState.maxTime || timePerQuestion)) * 100}%` }}
+                                    ></div>
+                                </div>
+                                
+                                <h2 className="text-xl md:text-2xl font-bold mb-6 leading-relaxed text-center min-h-[3rem]">
+                                    {gameState.currentQuestion.question}
+                                </h2>
+                                
+                                <div className="space-y-3">
+                                    {gameState.currentQuestion.options.map((opt, idx) => (
+                                        <button 
+                                            key={idx}
+                                            onClick={() => submitAnswer(idx)}
+                                            disabled={gameState.submitted}
+                                            className={`w-full p-4 rounded-xl text-left option-btn border-2 flex items-center gap-3
+                                                ${gameState.myAnswer === idx 
+                                                    ? 'bg-yellow-500/20 border-yellow-500' 
+                                                    : 'bg-white/5 border-white/10'}
+                                                ${gameState.submitted ? 'cursor-not-allowed' : 'hover:border-white/30'}
+                                            `}
+                                        >
+                                            <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm
+                                                ${gameState.myAnswer === idx ? 'bg-yellow-500 text-black' : 'bg-white/10'}`}>
+                                                {['A','B','C','D'][idx]}
+                                            </span>
+                                            <span className="flex-1">{opt}</span>
+                                            {gameState.myAnswer === idx && <i className="fa-solid fa-check text-yellow-400"></i>}
+                                        </button>
+                                    ))}
+                                </div>
+                                
+                                {gameState.submitted && (
+                                    <div className="text-center mt-4 text-yellow-400 animate-pulse">
+                                        <i className="fa-solid fa-lock mr-2"></i>Answer Locked!
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ===== INTERMISSION ===== */}
+                        {view === 'intermission' && gameState.currentQuestion && (
+                            <div className="animate-pop text-center">
+                                <div className={`text-6xl mb-4 ${gameState.myAnswer === gameState.correctAnswer ? 'text-green-400' : 'text-red-400'}`}>
+                                    {gameState.myAnswer === gameState.correctAnswer 
+                                        ? <i className="fa-solid fa-circle-check"></i>
+                                        : gameState.myAnswer === null 
+                                            ? <i className="fa-solid fa-clock"></i>
+                                            : <i className="fa-solid fa-circle-xmark"></i>
+                                    }
+                                </div>
+                                
+                                <h2 className="text-2xl font-bold mb-2">
+                                    {gameState.myAnswer === gameState.correctAnswer 
+                                        ? 'Correct!' 
+                                        : gameState.myAnswer === null
+                                            ? "Time's Up!"
+                                            : 'Wrong!'}
+                                </h2>
+                                
+                                <div className="bg-green-500/20 border border-green-500 p-4 rounded-xl mb-6">
+                                    <div className="text-xs text-green-300 mb-1">Correct Answer</div>
+                                    <div className="text-lg font-bold text-green-400">
+                                        {gameState.currentQuestion.options[gameState.correctAnswer]}
+                                    </div>
+                                </div>
+                                
+                                <div className="bg-black/30 rounded-xl p-4 mb-4">
+                                    <h3 className="text-xs uppercase text-gray-500 mb-3">
+                                        <i className="fa-solid fa-ranking-star mr-2"></i>Current Standings
+                                    </h3>
+                                    <div className="space-y-2">
+                                        {gameState.players
+                                            .sort((a, b) => (gameState.scores[b.id] || 0) - (gameState.scores[a.id] || 0))
+                                            .slice(0, 5)
+                                            .map((p, i) => (
+                                                <div key={p.id} className="flex justify-between items-center text-sm">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
+                                                            ${i === 0 ? 'bg-yellow-400 text-black' : i === 1 ? 'bg-gray-400 text-black' : i === 2 ? 'bg-orange-400 text-black' : 'bg-gray-700'}`}>
+                                                            {i + 1}
+                                                        </span>
+                                                        <span className={p.id === user?.id ? 'text-cyan-300 font-bold' : ''}>{p.username}</span>
+                                                    </div>
+                                                    <span className="font-mono font-bold">{gameState.scores[p.id] || 0}</span>
+                                                </div>
+                                            ))}
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center justify-center gap-2 text-cyan-400">
+                                    <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+                                    <span className="text-sm">Next question coming up...</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ===== LEADERBOARD ===== */}
+                        {view === 'leaderboard' && (
+                            <div className="animate-pop text-center">
+                                <Confetti active={true} />
+                                
+                                <div className="relative inline-block mb-4">
+                                    <i className="fa-solid fa-trophy text-6xl text-yellow-400 glow-yellow animate-float"></i>
+                                </div>
+                                
+                                <h2 className="text-3xl font-bold mb-1">Game Over!</h2>
+                                <p className="text-gray-400 mb-6">Final Results</p>
+                                
+                                <div className="bg-black/30 rounded-xl p-4 mb-6 max-h-[250px] overflow-y-auto custom-scrollbar">
+                                    {gameState.players
+                                        .sort((a, b) => (gameState.scores[b.id] || 0) - (gameState.scores[a.id] || 0))
+                                        .map((p, i) => (
+                                            <div key={p.id} className={`flex justify-between items-center p-3 rounded-xl mb-2
+                                                ${p.id === user?.id ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-white/5'}
+                                                ${i === 0 ? 'ring-2 ring-yellow-400' : ''}`}>
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg
+                                                        ${i === 0 ? 'bg-yellow-400 text-black' : i === 1 ? 'bg-gray-300 text-black' : i === 2 ? 'bg-orange-400 text-black' : 'bg-gray-700'}`}>
+                                                        {i === 0 ? <i className="fa-solid fa-crown"></i> : i + 1}
+                                                    </div>
+                                                    <div className="text-left">
+                                                        <div className={`font-bold ${p.id === user?.id ? 'text-cyan-300' : ''}`}>
+                                                            {p.username}
+                                                            {p.id === user?.id && <span className="ml-2 text-xs bg-cyan-500 text-black px-1.5 rounded">YOU</span>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <span className="font-mono text-2xl font-bold">{gameState.scores[p.id] || 0}</span>
+                                            </div>
+                                        ))}
+                                </div>
+                                
+                                <div className="flex gap-3">
+                                    <button 
+                                        onClick={playAgain}
+                                        className="flex-1 btn-primary py-3 rounded-xl font-bold"
+                                    >
+                                        <i className="fa-solid fa-rotate-right mr-2"></i>Play Again
+                                    </button>
+                                    <button 
+                                        onClick={exitGame}
+                                        className="flex-1 bg-white/10 hover:bg-white/20 py-3 rounded-xl font-bold transition"
+                                    >
+                                        <i className="fa-solid fa-door-open mr-2"></i>Exit
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* FOOTER */}
+                    <div className="mt-6 text-gray-600 text-xs text-center">
+                        <p>QuizBlitz - Play with friends worldwide!</p>
+                        <p className="mt-1">Powered by PeerJS P2P Technology</p>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
